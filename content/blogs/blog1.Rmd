@@ -1,0 +1,374 @@
+---
+title: "Airbnb Stockholm"
+author: "Study Group 14"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: flatly
+    highlight: zenburn
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+    code_folding: show
+---
+
+
+```{r, setup, echo=FALSE}
+knitr::opts_chunk$set(
+  message = FALSE, 
+  warning = FALSE, 
+  tidy=FALSE,     # display code as typed
+  size="small")   # slightly smaller font for code
+options(digits = 3)
+
+# default figure size
+knitr::opts_chunk$set(
+  fig.width=6.75, 
+  fig.height=6.75,
+  fig.align = "center"
+)
+```
+
+
+```{r load-libraries, echo=FALSE}
+library(tidyverse)
+library(mosaic)
+library(ggthemes)
+library(GGally)
+library(readxl)
+library(here)
+library(skimr)
+library(janitor)
+library(broom)
+library(tidyquant)
+library(infer)
+library(openintro)
+library(leaflet)
+library(car)
+library(huxtable)
+```
+
+# Introduction
+
+
+# Explanatory Data Analysis (EDA)
+First, we need to import the datas from AirBNB databse
+
+```{r load-data}
+#Import data
+listings <- vroom::vroom("http://data.insideairbnb.com/sweden/stockholms-l%C3%A4n/stockholm/2020-06-26/data/listings.csv.gz") %>% 
+  clean_names()
+```
+
+After we got the database, we can start exploring the data.
+
+## How many variables/columns? How many rows/observations?
+```{r EDA}
+glimpse(listings)
+```
+
+There are 106 columns and 7635 rows(listed houses)
+
+## Which variables are numbers?
+```{r numbers}
+skim(listings)
+```
+As we can see, by first look there are: 
+- Character: 46      
+- Date: 5       
+- Logical: 16      
+- Numeric: 39 
+But some numeric variables are defined as character, such as price, weekly_price and so on. Therefore, we need to change the columns to transform then into numeric variables.
+```{r changing_to_numeric}
+Right_listing <- listings %>% 
+        mutate(price=parse_number(price),
+               weekly_price = parse_number(weekly_price),
+               monthly_price = parse_number(monthly_price),
+               security_deposit = parse_number(security_deposit),
+               cleaning_fee = parse_number(cleaning_fee),
+               host_response_rate = parse_number(host_response_rate),
+               host_acceptance_rate = parse_number(host_acceptance_rate),
+               extra_people = parse_number(extra_people),
+               zipcode = parse_number(zipcode))
+```
+
+```{r numbers_right}
+skim(Right_listing)
+```
+As we can see, now there are: 
+
+- Character: 37
+- Date: 5   
+- Logical: 16     
+- Numeric: 48
+
+## Which are categorical or factor variables (numeric or character variables with variables that have a fixed and known set of possible values)?
+To make that analysis we need to define a range of distinct values to define it either as categorical or not. Therefore, we defined that less than 41 unique values and more than 2 are considered categorical variables
+```{r categorical}
+Categorical <- Right_listing %>%
+            summarise_each(funs(n_distinct)) %>%  #We calculate distinct values for each column
+            t() %>% 
+            as_tibble(rownames = "Variables") %>% #Convert back to tibble
+            filter(V1>2,V1<41) %>% 
+            arrange(V1)
+```
+
+Checking factors
+```{r factors}
+Right_listing %>% 
+  select(Categorical$Variables) %>% 
+  head()
+```
+These variable will be considered categorical: cancellation_policy, room_type, neighbourhood_cleansed , bed_type, property_type and neighbourhood. So, we need to turn them into factors.
+
+```{r turnIntoFactor}
+Right_listing <- Right_listing %>% 
+        mutate(cancellation_policy = as.factor(cancellation_policy),
+               room_type = as.factor(room_type),
+               neighbourhood_cleansed = as.factor(neighbourhood_cleansed),
+               bed_type = as.factor(bed_type),
+               property_type = as.factor(property_type),
+               neighbourhood = as.factor(neighbourhood)
+               )
+```
+
+## Are there any entry that is not in Stockholm?
+
+When we plotted the Map of all locations in Section 3, we realized that a lot of entries apparently are not located in Stockholm. We decided to come back to Explanatory Data Analysis section to treat our data and leave only entries in Stockholm.
+```{r cities}
+
+#Distinct location values
+Right_listing %>% distinct(smart_location, city)
+
+```
+
+The number of entries that seem to be not Stockholm are really high, so we researched about it and figured out that almost all of those cities are located Stockholm because the city is formed by a lot of different districts and island, so they are all part of the city. That is why we decided to keep it. Even some strange values are in Stockholm, like the accommodation that the city is defined by their Zipcode(114 24, 12573, 112 31 ), the one that is Korean(스톡홀름), or even in Chinese (斯德哥尔摩), also Japanese (ストックホルム), why not?
+
+However, there are values that are not in Stockholm, such as Uppsala(another swedish city), Crown Point - Trinidad and Tobago(another country) and there is this value "S, Sweden" and we have no idea what city is that. All those value will be taken off our database.
+
+```{r}
+#Filtering our dataset
+cleaned_listing <- 
+  Right_listing %>%
+  filter(city != "Uppsala", city != "Crown Point", city != "S")
+```
+
+
+## Any NAs?
+To produce a relevant work based on a database, we need to know if there is any NA value andi if yes, if we need to change them or they are just part of our database. But before that, we will create a dataframe with fewer column because we do not need all of them.
+
+```{r cleaned_listing}
+cleaned_listing <- Right_listing %>% 
+      select(id,
+             listing_url,
+             price,
+             cleaning_fee,
+             bed_type,
+             cancellation_policy,
+             last_review,
+             last_scraped,
+             latitude,
+             longitude,
+             bedrooms,
+             beds,
+             accommodates,
+             security_deposit,
+             monthly_price,
+             extra_people,
+             minimum_nights,
+             guests_included,
+             bathrooms,
+             availability_365,
+             availability_60,
+             number_of_reviews,
+             review_scores_rating,
+             review_scores_cleanliness,
+             host_is_superhost,
+             neighbourhood_cleansed,
+             reviews_per_month,
+             instant_bookable,
+             property_type,
+             room_type,
+             neighbourhood)
+```
+
+Now, we can check NAs
+```{r NAs}
+skim(cleaned_listing)
+
+```
+As we can see, some variables have missing values. For cleaning_fee, we are going to suppose that those host do not charge that fee and we will change to 0. For variables such as bedrooms and bed we are going to exclude them. For last_review, review_score variables and reviews_per_month we believe that those offers were not reviewed yet and we will keep them. Also, for monthly_price we suppose that missing values are because some offers do not have a special price for month rents and for security_deposit we assume that some hosts do not charge them.
+
+```{r excludeNA}
+cleaned_listing <- cleaned_listing %>% 
+          drop_na(bedrooms, beds)
+cleaned_listing <- cleaned_listing %>% 
+          mutate(cleaning_fee = case_when(is.na(cleaning_fee) ~ 0,
+                                TRUE ~ cleaning_fee))
+```
+
+## Property Types
+We will analyze "Property Types" column
+
+```{r Property Types}
+
+PropType_Per <- 
+  cleaned_listing %>% 
+  group_by(property_type) %>% 
+  summarize(n = n()) %>%
+  mutate(Frequence = n/sum(n)) %>%
+  arrange(desc(n))
+PropType_Per
+
+  #Let's sum the percentage for the top 4 categories
+  PropType_Per %>% 
+    top_n(4, Frequence) %>% 
+    summarize(sum(Frequence))
+
+```
+
+The top 4 type of property are: Apartment, House, Townhouse and Loft and they represent 93,7% of all accommodations.
+
+As requested, we will now create a simplified variable for property types.
+```{r roperty Types}
+#First, we need to transform Property Type in Character or the code below will fail
+cleaned_listing <- 
+  cleaned_listing %>%
+  mutate(property_type = as.character(property_type))
+
+#Now we can created the new variable
+cleaned_listing <- cleaned_listing %>%
+  mutate(prop_type_simplified = case_when(
+    property_type %in% c("Apartment","House", "Townhouse","Loft") ~ property_type, 
+    TRUE ~ "Other"
+  ))
+  
+#Now we transform the into factor and them see if it worked
+
+cleaned_listing <- 
+  cleaned_listing %>%
+  mutate(property_type = as.factor(property_type),
+         prop_type_simplified = as.factor(prop_type_simplified))
+  
+cleaned_listing %>%
+  count(property_type, prop_type_simplified) %>%
+  arrange(desc(n))  
+```
+It is working!
+
+## Histograms: Price
+
+```{r Price}
+# Calculating the favstats for price
+fav_stats(cleaned_listing$price)
+```
+
+Price range is really high, but we can try to plot it. The graphic below shows that prices are mainly concentrated under 2500 Euros per day, other values are spread out across the x axis. For some reason, there is a high concentration on price 13867, to solve that we created a table that shows the apartments with that price. Analyzing those apartments and theirs URLs, we realized that they do not even exist, also the have almost the same summary and the same latitude and longitude, so we decided to take them out of our date.
+Here are some of these accomodations if you want to take a look!
+
+```{r Price Plot}
+#Histogram for Price
+ggplot(cleaned_listing, aes(x = price)) + geom_histogram(binwidth = 50)
+
+#Analysing anomalie at Price = 13867.
+Filter_table <- cleaned_listing %>%
+        filter(price == 13867)
+head(Filter_table)
+
+#Excluding offers with Price = 13867.
+cleaned_listing <- cleaned_listing %>% 
+          filter(price != 13867)
+
+#Now we can check the histogram again
+ggplot(cleaned_listing, aes(x = price)) + geom_histogram(binwidth = 50)
+
+```
+
+## Histograms: Reviews Score
+
+To understand the satisfaction of customers with AirBNB's locations in Stockholm, we will analyse the histogram and the favstats for that variable.
+
+```{r Review}
+# Calculating the favstats for price
+fav_stats(cleaned_listing$review_scores_rating)
+```
+
+As we can see, reviews are really concentrated above 90, what is really good because the standard deviation is small and the mean is considerably high. 
+
+```{r Review Plot}
+#Histogram for Price
+ggplot(cleaned_listing, aes(x = review_scores_rating)) + 
+    geom_histogram(binwidth = 1)+
+    labs(title = "Reviews are left-skewed",
+    subtitle =  "but because the are highly concentraded at 100 and cannot go beyond that.")
+
+```
+
+## Minimum Nights
+Repeating the Property Type's process with minimum nights, we will analyze minimum nights for AirBNB's accomodations in Stockholm.
+```{r MinNights}
+Min_Nights <- cleaned_listing %>%
+               group_by(minimum_nights) %>% 
+               summarize(n = n()) %>%
+               mutate(Frequence = n/sum(n)) %>% 
+               arrange(desc(n))
+Min_Nights
+#Let's sum the percentage for the top 4 categories
+Min_Nights %>% 
+  top_n(4, Frequence) %>% 
+  summarize(sum(Frequence))
+
+```
+1,2,3 and 4 are most common values, 30 and 14 appear relevant, but together they represent 2,7% of accomodations. Now we will filter our data for  accommodations of only 4 days or less and then check if it worked.
+
+```{r Min Nights}
+cleaned_listing <- 
+  cleaned_listing %>% 
+  filter(minimum_nights <= 4)
+
+cleaned_listing %>%
+  count(minimum_nights) %>%
+  arrange(desc(n))  
+```
+It worked! We will move on!
+
+## What are the correlations between variables? Does each scatterplot support a linear relationship between variables? Do any of the correlations appear to be conditional on the value of a categorical variable?
+
+Based on the skim that we did before, we can the correlation between numerical variables.
+```{r correlation}
+cleaned_listing %>% 
+ggpairs(columns = c("price",
+                  "bedrooms",
+                  "beds",
+                  "accommodates",
+                  "bathrooms",
+                  "cleaning_fee",
+                  "review_scores_rating",
+                  "number_of_reviews",
+                  "guests_included",
+                  "extra_people"))
+```
+We can now analyze the correlations between crucial data:
+
+- Price: Weak correlation (<0,4) with all other variables, therefore, we cannot use any numeric variable to express price and the opposite is also true.
+- Bedrooms: Strong correlation(>0,7) with number of beds and accommodations and a moderate(>0,4) with number of bathroom. Due to house proportionality it makes sense and was already expected.
+- Bed: A strange negative correlation(<0) with number_of_reviews, it may show to us that larger houses tend to have fewer customers than small accommodations.
+- Guest Included: Moderate(>0,4) with number of extra people.
+
+Other correlations are not relevant to our analysis because they do not provide us any relevant information.
+
+
+
+# Mapping
+```{r MAP}
+leaflet(data = filter(cleaned_listing, minimum_nights <= 15)) %>% 
+  addProviderTiles("OpenStreetMap.Mapnik") %>% 
+  addCircleMarkers(lng = ~longitude, 
+                   lat = ~latitude, 
+                   radius = 1, 
+                   fillColor = "blue", 
+                   fillOpacity = 0.4, 
+                   popup = ~listing_url,
+                   label = ~property_type)
+```
+
